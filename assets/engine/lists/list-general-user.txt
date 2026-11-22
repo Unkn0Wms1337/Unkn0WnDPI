@@ -1,0 +1,13 @@
+# Пользовательский список доменов (обход DPI).
+# Добавляйте сюда свои сайты по одному в строке, без http:// и слешей.
+
+# Игры и лаунчеры (FIFA/EA, Call of Duty, Blizzard)
+ea.com
+eaassets-a.akamaihd.net
+origin.com
+callofduty.com
+activision.com
+demonware.net
+fifa.com
+battle.net
+blizzard.com
