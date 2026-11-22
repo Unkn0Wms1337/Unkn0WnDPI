@@ -1,6 +1,6 @@
 [package]
 name = "unkn0wndpi"
-version = "2.0.0"
+version = "2.1.0"
 edition = "2021"
 description = "Unkn0WnDPI — обход DPI для Windows (zapret), консольный интерфейс"
 license = "MIT"

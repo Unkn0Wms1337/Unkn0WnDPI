@@ -1,0 +1,13 @@
+* text=auto
+
+# Windows batch files and engine lists are stored with CRLF, exactly as shipped.
+*.bat -text
+assets/engine/lists/*.txt -text
+assets/engine/utils/*.txt -text
+
+*.exe binary
+*.dll binary
+*.sys binary
+*.bin binary
+*.ico binary
+*.png binary

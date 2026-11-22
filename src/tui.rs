@@ -23,6 +23,7 @@ use crate::presets::{self, Preset};
 use crate::settings::Settings;
 use crate::tgws::TgStatus;
 use crate::tray;
+use crate::updater::{self, UpdateReport};
 use crate::winproc::{self, BypassStatus, Mode, SERVICE_NAME};
 
 // ------------------------------------------------------------------ палитра CMD
@@ -104,7 +105,7 @@ enum Msg {
     },
     Test(TestReport),
     Diag(Result<String, String>),
-    Update(Result<String, String>),
+    Update(Result<UpdateReport, String>),
     Auto(AutoEvent),
 }
 
@@ -486,10 +487,20 @@ impl App {
                 Msg::Update(result) => {
                     self.job = None;
                     match result {
-                        Ok(n) => self.toast(format!("Список IP обновлён: {n} строк"), ToastKind::Ok),
+                        Ok(report) => {
+                            let kind = if report.failures.is_empty() {
+                                ToastKind::Ok
+                            } else {
+                                ToastKind::Info
+                            };
+                            self.toast(
+                                format!("Списки и IP: {} · перезапуск не нужен", report.toast()),
+                                kind,
+                            );
+                        }
                         Err(e) => {
-                            self.logger.error(format!("Обновление списка IP: {e}"));
-                            self.toast(format!("Список IP: {e}"), ToastKind::Err);
+                            self.logger.error(format!("Обновление списков и IP: {e}"));
+                            self.toast(format!("Списки и IP: {e}"), ToastKind::Err);
                         }
                     }
                 }
@@ -851,7 +862,10 @@ impl App {
                 Cmd::Settings(2),
             ),
             ("Удалить службу Windows".to_string(), Cmd::Settings(3)),
-            ("Обновить списки IP".to_string(), Cmd::Settings(4)),
+            (
+                "Обновить списки и IP (GitHub)".to_string(),
+                Cmd::Settings(4),
+            ),
             (
                 "Удалить службу и автозапуск".to_string(),
                 Cmd::Settings(5),
@@ -1158,12 +1172,12 @@ impl App {
         if self.guard_job() {
             return;
         }
-        self.job = Some("обновляю списки IP…".into());
+        self.job = Some("обновляю списки и IP из GitHub…".into());
         let tx = self.tx_clone();
         let paths = self.paths.clone();
         let logger = self.logger.clone();
         std::thread::spawn(move || {
-            let res = netcheck::update_ipset(&paths, &logger, None);
+            let res = updater::update_all(&paths, &logger);
             let _ = tx.send(Msg::Update(res));
         });
     }
@@ -1552,9 +1566,25 @@ impl App {
         let block = frame_block("О ПРОГРАММЕ");
         let inner = block.inner(chunks[1]);
         f.render_widget(block, chunks[1]);
-        let ipset = std::fs::read_to_string(self.paths.lists.join("ipset-all.txt"))
-            .map(|t| t.lines().filter(|l| !l.trim().is_empty()).count())
-            .unwrap_or(0);
+        let hosts = ["list-general.txt", "list-google.txt", "list-exclude.txt"]
+            .iter()
+            .map(|name| content_lines(&self.paths.lists.join(name)))
+            .sum::<usize>();
+        let ipset = content_lines(&self.paths.lists.join("ipset-all.txt"));
+        let newest = ["ipset-all.txt", "list-general.txt", "list-google.txt", "list-exclude.txt"]
+            .iter()
+            .filter_map(|name| {
+                std::fs::metadata(self.paths.lists.join(name))
+                    .and_then(|meta| meta.modified())
+                    .ok()
+            })
+            .max()
+            .map(|time| {
+                chrono::DateTime::<chrono::Local>::from(time)
+                    .format("%d.%m %H:%M")
+                    .to_string()
+            })
+            .unwrap_or_else(|| "—".to_string());
         let lines = vec![
             Line::from(vec![
                 Span::styled("Версия  ", Style::new().fg(DIM)),
@@ -1569,7 +1599,17 @@ impl App {
             ]),
             Line::from(vec![
                 Span::styled("Списки  ", Style::new().fg(DIM)),
-                Span::styled(format!("{ipset} строк (Flowseal)"), Style::new().fg(TEXT)),
+                Span::styled(
+                    format!("домены: {hosts} · IP: {ipset} (GitHub)"),
+                    Style::new().fg(TEXT),
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled("Обновл. ", Style::new().fg(DIM)),
+                Span::styled(
+                    format!("{newest} · применяется без перезапуска"),
+                    Style::new().fg(TEXT),
+                ),
             ]),
             Line::from(vec![
                 Span::styled("Права   ", Style::new().fg(DIM)),
@@ -1717,6 +1757,19 @@ fn frame_block(title: &str) -> Block<'static> {
             format!(" {title} "),
             Style::new().fg(GREEN).add_modifier(Modifier::BOLD),
         ))
+}
+
+fn content_lines(path: &std::path::Path) -> usize {
+    std::fs::read_to_string(path)
+        .map(|text| {
+            text.lines()
+                .filter(|line| {
+                    let line = line.trim();
+                    !line.is_empty() && !line.starts_with('#')
+                })
+                .count()
+        })
+        .unwrap_or(0)
 }
 
 fn draw_menu(f: &mut Frame, area: Rect, title: &str, items: &[String], selected: usize) {

@@ -12,6 +12,7 @@ mod settings;
 mod tgws;
 mod tray;
 mod tui;
+mod updater;
 mod winproc;
 
 use logging::Logger;
@@ -46,6 +47,12 @@ fn main() {
 
     if run_selftest {
         selftest_main();
+        return;
+    }
+
+    // Обновление списков без запуска интерфейса (удобно для планировщика).
+    if raw_args.iter().any(|a| a == "--update-lists") {
+        update_lists_main();
         return;
     }
 
@@ -183,6 +190,26 @@ fn main() {
     guard::signal_quit_all();
     if let Err(e) = ui {
         winproc::show_message("Unkn0WnDPI", &format!("Ошибка интерфейса: {e}"), true);
+    }
+}
+
+fn update_lists_main() {
+    let paths = Paths::init();
+    let logger = Logger::new(&paths.log_file, false);
+    engine::ensure_user_lists(&paths);
+    match updater::update_all(&paths, &logger) {
+        Ok(report) => {
+            print!("{}", report.detail());
+            if !report.failures.is_empty() {
+                eprintln!("Обновление завершено частично: не все файлы удалось получить.");
+                std::process::exit(1);
+            }
+            println!("Готово. Перезапуск не требуется: winws перечитывает списки автоматически.");
+        }
+        Err(e) => {
+            eprintln!("Не удалось обновить списки: {e}");
+            std::process::exit(1);
+        }
     }
 }
 

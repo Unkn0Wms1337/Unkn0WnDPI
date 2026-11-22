@@ -6,7 +6,7 @@ use crate::paths::Paths;
 include!(concat!(env!("OUT_DIR"), "/embedded_assets.rs"));
 
 pub const ENGINE_VERSION: &str = "1.10.4";
-pub const APP_VERSION: &str = "2.0.0";
+pub const APP_VERSION: &str = "2.1.0";
 
 /// Распаковывает встроенный движок. Бинарники обновляются при смене сборки,
 /// пользовательские списки никогда не перезаписываются.

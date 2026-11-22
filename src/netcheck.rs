@@ -1,13 +1,12 @@
 use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
-use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant};
 
 use native_tls::TlsConnector;
 use serde::{Deserialize, Serialize};
 
+use crate::engine::APP_VERSION;
 use crate::logging::{Level, Logger};
-use crate::paths::Paths;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Target {
@@ -98,7 +97,7 @@ fn connect_any(host: &str, port: u16, timeout: Duration) -> Result<TcpStream, St
 }
 
 /// Простой HTTPS-запрос. Возвращает статус и тело (для обновления списков).
-fn https_request(
+pub(crate) fn https_request(
     url: &str,
     timeout: Duration,
     max_body: usize,
@@ -117,7 +116,7 @@ fn https_request(
         .map_err(|e| e.to_string())?;
 
     let req = format!(
-        "GET {path} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: Unkn0WnDPI/2.0 (Windows)\r\nAccept: */*\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n"
+        "GET {path} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: Unkn0WnDPI/{APP_VERSION} (Windows)\r\nAccept: */*\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n"
     );
     tls.write_all(req.as_bytes()).map_err(|e| e.to_string())?;
     tls.flush().ok();
@@ -289,53 +288,4 @@ pub fn report_lines(report: &TestReport, log: &Logger) {
     ));
 }
 
-pub const IPSET_URL: &str =
-    "https://raw.githubusercontent.com/Flowseal/zapret-discord-youtube/refs/heads/main/.service/ipset-service.txt";
 
-pub fn update_ipset(paths: &Paths, log: &Logger, tx: Option<Sender<String>>) -> Result<String, String> {
-    log.info("Загружаю список IP...");
-    let mut url = IPSET_URL.to_string();
-    let mut body = Vec::new();
-    for _ in 0..6 {
-        let (code, data, location) = https_request(&url, Duration::from_secs(90), 40 * 1024 * 1024)?;
-        if (300..400).contains(&code) {
-            if let Some(loc) = location {
-                url = if loc.starts_with("http") {
-                    loc
-                } else {
-                    let base = url.splitn(4, '/').collect::<Vec<_>>();
-                    format!("https://{}/{}", base.get(2).unwrap_or(&"raw.githubusercontent.com"), loc.trim_start_matches('/'))
-                };
-                continue;
-            }
-        }
-        if code != 200 {
-            return Err(format!("сервер вернул HTTP {code}"));
-        }
-        body = data;
-        break;
-    }
-    if body.is_empty() {
-        return Err("пустой ответ сервера".into());
-    }
-    let text = String::from_utf8_lossy(&body);
-    let count = text.lines().filter(|l| !l.trim().is_empty()).count();
-    if count < 1000 {
-        return Err(format!("подозрительно мало строк: {count}"));
-    }
-    if let Some(tx) = tx {
-        let _ = tx.send(format!("{count}"));
-    }
-    let out = paths.lists.join("ipset-all.txt");
-    let tmp = paths.logs.join("ipset-new.txt");
-    std::fs::write(&tmp, &body).map_err(|e| e.to_string())?;
-    if out.exists() {
-        let _ = std::fs::copy(&out, paths.lists.join("ipset-all.txt.backup"));
-    }
-    std::fs::rename(&tmp, &out).map_err(|e| e.to_string())?;
-    log.ok(format!("Список IP обновлён: {count} строк"));
-    if crate::winproc::status(paths).running {
-        log.warn("Перезапустите обход, чтобы применить новый список.");
-    }
-    Ok(format!("{count}"))
-}
